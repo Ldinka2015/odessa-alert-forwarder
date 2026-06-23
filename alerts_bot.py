@@ -1,80 +1,80 @@
 import os
+import time
+import requests
 import telebot
+from bs4 import BeautifulSoup
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
-SOURCE_CHANNEL = "Odessa911Odessa"
+
+SOURCE_URL = "https://t.me/s/Odessa911Odessa"
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+last_message_id = None
 
 def parse_alert(text):
     if not text:
         return None
 
-    t = text.lower()
     if "🚨" in text:
         return "🚨 ТРЕВОГА"
 
-    if "✅" in text or "🟢" in text:
+    t = text.lower()
+
+    if "відбій" in t or "отбой" in t:
         return "✅ ОТБОЙ"
-    is_alarm = any(x in t for x in [
-        "тревога",
-        "воздушная тревога",
-        "повітряна тривога",
-        "тривога"
-    ])
 
-    is_clear = any(x in t for x in [
-        "отбой",
-        "відбій",
-        "відбій тривоги"
-    ])
+    if "тривога" in t or "тревога" in t:
+        return "🚨 ТРЕВОГА"
 
-    threats = []
+    return None
 
-    if any(x in t for x in ["бпла", "шахед", "shahed", "дрон", "дрони"]):
-        threats.append("БПЛА")
+def get_latest_posts():
+    response = requests.get(SOURCE_URL, timeout=20)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    if any(x in t for x in ["ракета", "ракеты", "крилата", "крылатая"]):
-        threats.append("ракета")
+    posts = []
 
-    if any(x in t for x in ["баллистика", "балістика", "балл"]):
-        threats.append("баллистика")
+    for message in soup.select(".tgme_widget_message"):
+        post_id = message.get("data-post")
+        text_block = message.select_one(".tgme_widget_message_text")
+        text = text_block.get_text(" ", strip=True) if text_block else ""
 
-    if "каб" in t:
-        threats.append("КАБ")
+        if post_id:
+            posts.append((post_id, text))
 
-    if is_alarm:
-        status = "🚨 ТРЕВОГА"
-    elif is_clear:
-        status = "✅ ОТБОЙ"
-    elif threats:
-        status = "⚠️ УГРОЗА"
-    else:
-        return None
+    return posts
 
-    result = status
+print("Bot started. Watching public Telegram page.")
 
-    if threats:
-        result += " | " + ", ".join(threats)
+while True:
+    try:
+        posts = get_latest_posts()
 
-    return result
+        if posts:
+            latest_id, latest_text = posts[-1]
 
-@bot.channel_post_handler(content_types=["text"])
-def handle_channel_post(message):
-    chat_username = message.chat.username
+            if last_message_id is None:
+                last_message_id = latest_id
+                print("Initial message:", latest_id)
 
-    if chat_username != SOURCE_CHANNEL:
-        return
+            elif latest_id != last_message_id:
+                last_message_id = latest_id
+                parsed = parse_alert(latest_text)
 
-    parsed = parse_alert(message.text)
+                if parsed:
+                    bot.send_message(
+                        TARGET_CHANNEL,
+                        parsed,
+                        disable_web_page_preview=True
+                    )
+                    print("Sent:", parsed)
+                else:
+                    print("Skipped:", latest_text[:80])
 
-    if parsed:
-        bot.send_message(
-            TARGET_CHANNEL,
-            parsed,
-            disable_web_page_preview=True
-        )
+        time.sleep(20)
 
-print("Bot started and watching channel posts")
-bot.infinity_polling(allowed_updates=["channel_post"])
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(20)
