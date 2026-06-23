@@ -12,7 +12,11 @@ def parse_alert(text):
         return None
 
     t = text.lower()
+    if "🚨" in text:
+        return "🚨 ТРЕВОГА"
 
+    if "✅" in text or "🟢" in text:
+        return "✅ ОТБОЙ"
     is_alarm = any(x in t for x in [
         "тревога",
         "воздушная тревога",
