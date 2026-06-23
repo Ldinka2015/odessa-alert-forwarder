@@ -3,6 +3,7 @@ import telebot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
+SOURCE_CHANNEL = "Odessa911Odessa"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -55,8 +56,13 @@ def parse_alert(text):
 
     return result
 
-@bot.message_handler(content_types=["text"])
-def handle_message(message):
+@bot.channel_post_handler(content_types=["text"])
+def handle_channel_post(message):
+    chat_username = message.chat.username
+
+    if chat_username != SOURCE_CHANNEL:
+        return
+
     parsed = parse_alert(message.text)
 
     if parsed:
@@ -66,5 +72,5 @@ def handle_message(message):
             disable_web_page_preview=True
         )
 
-print("Bot started")
-bot.infinity_polling()
+print("Bot started and watching channel posts")
+bot.infinity_polling(allowed_updates=["channel_post"])
