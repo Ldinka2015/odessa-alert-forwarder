@@ -1,87 +1,70 @@
 import os
 import telebot
-from telethon import TelegramClient, events
-from telethon.sessions import StringSession
 
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-SESSION_STRING = os.getenv("SESSION_STRING")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
 
-SOURCE_CHANNEL = "Odessa911Odessa"
-
 bot = telebot.TeleBot(BOT_TOKEN)
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-KEYWORDS = [
-    "тревога",
-    "воздушная тревога",
-    "повітряна тривога",
-    "тривога",
-    "отбой",
-    "відбій",
-    "бпла",
-    "шахед",
-    "shahed",
-    "дрон",
-    "дрони",
-    "ракета",
-    "ракеты",
-    "крилата",
-    "крылатая",
-    "баллистика",
-    "балістика",
-    "каб",
-]
-
-def is_relevant(text):
+def parse_alert(text):
     if not text:
-        return False
+        return None
 
     t = text.lower()
-    return any(word in t for word in KEYWORDS)
 
-def format_message(text):
-    t = text.lower()
+    is_alarm = any(x in t for x in [
+        "тревога",
+        "воздушная тревога",
+        "повітряна тривога",
+        "тривога"
+    ])
 
-    if any(x in t for x in ["отбой", "відбій"]):
-        prefix = "✅ ОТБОЙ"
-    elif any(x in t for x in ["тревога", "воздушная тревога", "повітряна тривога", "тривога"]):
-        prefix = "🚨 ТРЕВОГА"
+    is_clear = any(x in t for x in [
+        "отбой",
+        "відбій",
+        "відбій тривоги"
+    ])
+
+    threats = []
+
+    if any(x in t for x in ["бпла", "шахед", "shahed", "дрон", "дрони"]):
+        threats.append("БПЛА")
+
+    if any(x in t for x in ["ракета", "ракеты", "крилата", "крылатая"]):
+        threats.append("ракета")
+
+    if any(x in t for x in ["баллистика", "балістика", "балл"]):
+        threats.append("баллистика")
+
+    if "каб" in t:
+        threats.append("КАБ")
+
+    if is_alarm:
+        status = "🚨 ТРЕВОГА"
+    elif is_clear:
+        status = "✅ ОТБОЙ"
+    elif threats:
+        status = "⚠️ УГРОЗА"
     else:
-        prefix = "⚠️ УГРОЗА"
+        return None
 
-    clean_text = text.strip()
+    result = status
 
-    if clean_text.startswith(prefix):
-        return clean_text
+    if threats:
+        result += " | " + ", ".join(threats)
 
-    return f"{prefix}\n\n{clean_text}"
+    return result
 
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL))
-async def handler(event):
-    text = event.raw_text
+@bot.message_handler(content_types=["text"])
+def handle_message(message):
+    parsed = parse_alert(message.text)
 
-    # Если текста нет — значит это картинка/видео/карта без текста. Игнорируем.
-    if not text:
-        return
+    if parsed:
+        bot.send_message(
+            TARGET_CHANNEL,
+            parsed,
+            disable_web_page_preview=True
+        )
 
-    # Берём только тревоги, отбой и сообщения о том, что летит.
-    if not is_relevant(text):
-        return
-
-    message = format_message(text)
-
-    bot.send_message(
-        TARGET_CHANNEL,
-        message,
-        disable_web_page_preview=True
-    )
-
-async def main():
-    print("Alerts forwarder started")
-    await client.run_until_disconnected()
-
-with client:
-    client.loop.run_until_complete(main())
+print("Bot started")
+bot.infinity_polling()
