@@ -21,7 +21,11 @@ def parse_alert(text):
         return "🚨 ТРЕВОГА"
 
     t = text.lower()
+    if "в укрытие" in t or "в укритті" in t or "укриття" in t:
+        return "🚨 ТРЕВОГА"
 
+    if "доразведка" in t or "все слышали" in t:
+        return "🚨 ТРЕВОГА"
     if "відбій" in t or "отбой" in t:
         return "✅ ОТБОЙ"
 
