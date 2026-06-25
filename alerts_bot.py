@@ -24,6 +24,8 @@ def save_last_id(msg_id):
         pass
 
 def get_location(text):
+    if not text:
+        return None
     t = text.lower()
     if "чорноморськ" in t:
         return "Чорноморськ"
@@ -85,7 +87,7 @@ def get_posts():
             text_block = message.select_one(".tgme_widget_message_text")
             text = text_block.get_text(" ", strip=True) if text_block else ""
             
-            if post_id and text:
+            if post_id:
                 try:
                     posts.append((int(post_id), text))
                 except:
@@ -93,7 +95,8 @@ def get_posts():
         
         posts.reverse()
         return posts
-    except:
+    except Exception as e:
+        print(f"Error: {e}")
         return []
 
 print("Alert forwarder LIVE")
