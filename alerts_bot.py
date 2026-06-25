@@ -1,6 +1,7 @@
 import os
-from pyrogram import Client, filters
-from pyrogram.types import Message
+import asyncio
+from pyrogram import Client
+from datetime import datetime
 
 # Переменные окружения
 API_ID = int(os.getenv("API_ID"))
@@ -16,7 +17,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# Ключевые слова для парсинга
+# Словари для парсинга
 ALERTS = {
     "чисто": "✅ ОТБОЙ",
     "у нас чисто": "✅ ОТБОЙ",
@@ -33,19 +34,17 @@ THREATS = {
     "цель": "🚨 ЦЕЛЬ",
 }
 
-DIRECTIONS = [
-    "запад", "схід", "север", "юг", "затока", "курсом",
-    "море", "сторону", "на", "курс"
-]
+last_message_id = 0
 
 def extract_direction(text):
     """Парсит направление из текста"""
     text_lower = text.lower()
     words = text_lower.split()
     
+    directions = ["запад", "схід", "север", "юг", "затока", "курсом", "море", "сторону", "на"]
+    
     for i, word in enumerate(words):
-        if any(d in word for d in DIRECTIONS):
-            # Собираем следующие 1-2 слова как направление
+        if any(d in word for d in directions):
             direction_part = " ".join(words[i:min(i+3, len(words))])
             return direction_part
     return None
@@ -72,45 +71,59 @@ def parse_message(text):
     
     # Проверяем "в укрытие"
     if "укри" in text_lower or "укрытие" in text_lower:
-        # Пытаемся найти локацию
         words = text.split()
         location = words[0] if words else ""
         return f"🚨 {location} в укрытие!"
     
     return None
 
-def has_alarm_image(message: Message):
-    """Проверяет наличие изображения сирены в сообщении"""
-    # Если есть фото без видео - это сирена
-    if message.photo and not message.video:
-        return True
-    return False
-
-@app.on_message(filters.channel & filters.incoming)
-async def forward_alerts(client: Client, message: Message):
-    """Основной обработчик сообщений"""
-    # Проверяем что сообщение из исходного канала
-    if message.chat.username != SOURCE_CHANNEL:
-        return
+async def check_messages():
+    """Полинг новых сообщений"""
+    global last_message_id
     
-    alert_text = None
+    try:
+        async with app:
+            print(f"Alert forwarder started. Listening to @{SOURCE_CHANNEL}...")
+            
+            while True:
+                try:
+                    # Получаем последние сообщения
+                    messages = []
+                    async for message in app.get_chat_history(SOURCE_CHANNEL, limit=5):
+                        messages.append(message)
+                    
+                    # Обрабатываем в обратном порядке (старые->новые)
+                    for message in reversed(messages):
+                        if message.id > last_message_id:
+                            last_message_id = message.id
+                            
+                            alert_text = None
+                            
+                            # Проверяем текст
+                            if message.text:
+                                alert_text = parse_message(message.text)
+                            
+                            # Проверяем фото (сирены)
+                            if message.photo and not alert_text:
+                                alert_text = "🚨 ВОЗДУШНАЯ ТРЕВОГА"
+                            
+                            # Отправляем если нашли
+                            if alert_text:
+                                try:
+                                    await app.send_message(TARGET_CHANNEL, alert_text)
+                                    print(f"Sent: {alert_text}")
+                                except Exception as e:
+                                    print(f"Error sending: {e}")
+                    
+                    # Ждём 3 секунды перед следующей проверкой
+                    await asyncio.sleep(3)
+                    
+                except Exception as e:
+                    print(f"Error checking messages: {e}")
+                    await asyncio.sleep(5)
     
-    # Проверяем текст
-    if message.text:
-        alert_text = parse_message(message.text)
-    
-    # Проверяем картинки (сирены)
-    if message.photo and not alert_text:
-        alert_text = "🚨 ВОЗДУШНАЯ ТРЕВОГА"
-    
-    # Если нашли что-то - отправляем
-    if alert_text:
-        try:
-            await client.send_message(TARGET_CHANNEL, alert_text)
-            print(f"Sent: {alert_text}")
-        except Exception as e:
-            print(f"Error sending message: {e}")
+    except Exception as e:
+        print(f"Fatal error: {e}")
 
 if __name__ == "__main__":
-    print("Alert forwarder started. Listening to @raketna_neb...")
-    app.run()
+    app.run(check_messages())
