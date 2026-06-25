@@ -86,17 +86,17 @@ def get_posts():
             post_id = message.get("data-post")
             text_block = message.select_one(".tgme_widget_message_text")
             text = text_block.get_text(" ", strip=True) if text_block else ""
+            has_photo = message.select_one(".tgme_widget_message_photo") is not None
             
             if post_id:
                 try:
-                    posts.append((int(post_id), text))
+                    posts.append((int(post_id), text, has_photo))
                 except:
                     pass
         
         posts.reverse()
         return posts
-    except Exception as e:
-        print(f"Error: {e}")
+    except:
         return []
 
 print("Alert forwarder LIVE")
@@ -106,13 +106,16 @@ while True:
         posts = get_posts()
         
         if posts:
-            msg_id, msg_text = posts[0]
+            msg_id, msg_text, has_photo = posts[0]
             
             if msg_id > last_message_id:
                 last_message_id = msg_id
                 save_last_id(msg_id)
                 
                 alerts = parse_alerts(msg_text)
+                
+                if not alerts and has_photo:
+                    alerts.append("🚨 ВОЗДУШНАЯ ТРЕВОГА")
                 
                 for alert in alerts:
                     try:
