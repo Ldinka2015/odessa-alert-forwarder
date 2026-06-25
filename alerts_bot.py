@@ -45,7 +45,7 @@ def parse_alerts(text):
     alerts = []
     location = get_location(text)
     
-    if "шахед" in t:
+    if "шахед" in t or "шахеди" in t:
         alerts.append(f"🚨 ШАХЕДИ | {location}" if location else "🚨 ШАХЕДИ")
     
     if "баллістик" in t or "балістик" in t:
