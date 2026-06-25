@@ -1,23 +1,16 @@
 import os
-import asyncio
-from pyrogram import Client
-from datetime import datetime
+import time
+import requests
+from bs4 import BeautifulSoup
+import telebot
 
-# Переменные окружения
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-SOURCE_CHANNEL = "raketna_neb"
-TARGET_CHANNEL = "twq_b"
+TARGET_CHANNEL = os.getenv("TARGET_CHANNEL", "twq_b")
+SOURCE_URL = "https://t.me/s/raketna_neb"
 
-app = Client(
-    "alert_forwarder",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+bot = telebot.TeleBot(BOT_TOKEN)
+last_message_id = None
 
-# Словари для парсинга
 ALERTS = {
     "чисто": "✅ ОТБОЙ",
     "у нас чисто": "✅ ОТБОЙ",
@@ -34,34 +27,26 @@ THREATS = {
     "цель": "🚨 ЦЕЛЬ",
 }
 
-last_message_id = 0
-
 def extract_direction(text):
-    """Парсит направление из текста"""
     text_lower = text.lower()
     words = text_lower.split()
-    
-    directions = ["запад", "схід", "север", "юг", "затока", "курсом", "море", "сторону", "на"]
+    directions = ["запад", "схід", "север", "юг", "затока", "курсом", "море"]
     
     for i, word in enumerate(words):
         if any(d in word for d in directions):
-            direction_part = " ".join(words[i:min(i+3, len(words))])
-            return direction_part
+            return " ".join(words[i:min(i+3, len(words))])
     return None
 
 def parse_message(text):
-    """Анализирует сообщение и возвращает форматированный вывод"""
     if not text:
         return None
     
     text_lower = text.lower()
     
-    # Проверяем отбой
     for alert_key, alert_msg in ALERTS.items():
         if alert_key in text_lower:
             return alert_msg
     
-    # Проверяем угрозы
     for threat_key, threat_msg in THREATS.items():
         if threat_key in text_lower:
             direction = extract_direction(text)
@@ -69,61 +54,70 @@ def parse_message(text):
                 return f"{threat_msg} | {direction}"
             return threat_msg
     
-    # Проверяем "в укрытие"
-    if "укри" in text_lower or "укрытие" in text_lower:
+    if "укри" in text_lower:
         words = text.split()
         location = words[0] if words else ""
         return f"🚨 {location} в укрытие!"
     
     return None
 
-async def check_messages():
-    """Полинг новых сообщений"""
-    global last_message_id
-    
+def get_latest_posts():
     try:
-        async with app:
-            print(f"Alert forwarder started. Listening to @{SOURCE_CHANNEL}...")
+        response = requests.get(SOURCE_URL, timeout=20)
+        soup = BeautifulSoup(response.text, "html.parser")
+        posts = []
+        
+        for message in soup.select(".tgme_widget_message"):
+            post_id = message.get("data-post")
+            text_block = message.select_one(".tgme_widget_message_text")
+            text = text_block.get_text(" ", strip=True) if text_block else ""
             
-            while True:
-                try:
-                    # Получаем последние сообщения
-                    messages = []
-                    async for message in app.get_chat_history(SOURCE_CHANNEL, limit=5):
-                        messages.append(message)
-                    
-                    # Обрабатываем в обратном порядке (старые->новые)
-                    for message in reversed(messages):
-                        if message.id > last_message_id:
-                            last_message_id = message.id
-                            
-                            alert_text = None
-                            
-                            # Проверяем текст
-                            if message.text:
-                                alert_text = parse_message(message.text)
-                            
-                            # Проверяем фото (сирены)
-                            if message.photo and not alert_text:
-                                alert_text = "🚨 ВОЗДУШНАЯ ТРЕВОГА"
-                            
-                            # Отправляем если нашли
-                            if alert_text:
-                                try:
-                                    await app.send_message(TARGET_CHANNEL, alert_text)
-                                    print(f"Sent: {alert_text}")
-                                except Exception as e:
-                                    print(f"Error sending: {e}")
-                    
-                    # Ждём 3 секунды перед следующей проверкой
-                    await asyncio.sleep(3)
-                    
-                except Exception as e:
-                    print(f"Error checking messages: {e}")
-                    await asyncio.sleep(5)
+            # Проверяем есть ли фото (без видео)
+            has_photo = message.select_one(".tgme_widget_message_photo") is not None
+            has_video = message.select_one(".tgme_widget_message_video") is not None
+            
+            if post_id:
+                posts.append((post_id, text, has_photo and not has_video))
+        
+        return posts
+    except Exception as e:
+        print(f"Error getting posts: {e}")
+        return []
+
+print("Alert forwarder started. Listening to @raketna_neb...")
+
+while True:
+    try:
+        posts = get_latest_posts()
+        
+        if posts:
+            latest_id, latest_text, has_photo = posts[-1]
+            
+            if last_message_id is None:
+                last_message_id = latest_id
+                print(f"Initial message: {latest_id}")
+            elif latest_id != last_message_id:
+                last_message_id = latest_id
+                
+                alert_text = None
+                
+                if latest_text:
+                    alert_text = parse_message(latest_text)
+                
+                if has_photo and not alert_text:
+                    alert_text = "🚨 ВОЗДУШНАЯ ТРЕВОГА"
+                
+                if alert_text:
+                    try:
+                        bot.send_message(TARGET_CHANNEL, alert_text)
+                        print(f"Sent: {alert_text}")
+                    except Exception as e:
+                        print(f"Error sending: {e}")
+                else:
+                    print(f"Skipped: {latest_text[:50] if latest_text else 'photo'}")
+        
+        time.sleep(3)
     
     except Exception as e:
-        print(f"Fatal error: {e}")
-
-if __name__ == "__main__":
-    app.run(check_messages())
+        print(f"Error: {e}")
+        time.sleep(5)
