@@ -5,63 +5,76 @@ from bs4 import BeautifulSoup
 import telebot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_CHANNEL = os.getenv("TARGET_CHANNEL", "twq_b")
+TARGET_CHANNEL = os.getenv("TARGET_CHANNEL", "@twq_b")
 SOURCE_URL = "https://t.me/s/raketna_neb"
 
 bot = telebot.TeleBot(BOT_TOKEN)
-last_message_id = None
 
-ALERTS = {
-    "чисто": "✅ ОТБОЙ",
-    "у нас чисто": "✅ ОТБОЙ",
-    "видихаємо": "✅ ОТБОЙ",
-    "отбой": "✅ ОТБОЙ",
-}
+try:
+    with open('/tmp/last_message_id.txt', 'r') as f:
+        last_message_id = int(f.read().strip())
+except:
+    last_message_id = -1
 
-THREATS = {
-    "баллістики": "🚨 БАЛЛИСТИКА",
-    "балістики": "🚨 БАЛЛИСТИКА",
-    "шахеди": "🚨 ШАХЕДИ",
-    "міг": "🚨 МИГ",
-    "ракета": "🚨 РАКЕТА",
-    "цель": "🚨 ЦЕЛЬ",
-}
+def save_last_id(msg_id):
+    try:
+        with open('/tmp/last_message_id.txt', 'w') as f:
+            f.write(str(msg_id))
+    except:
+        pass
 
-def extract_direction(text):
-    text_lower = text.lower()
-    words = text_lower.split()
-    directions = ["запад", "схід", "север", "юг", "затока", "курсом", "море"]
-    
-    for i, word in enumerate(words):
-        if any(d in word for d in directions):
-            return " ".join(words[i:min(i+3, len(words))])
+def get_location(text):
+    t = text.lower()
+    if "чорноморськ" in t:
+        return "Чорноморськ"
+    elif "затока" in t:
+        return "Затока"
+    elif "порт" in t:
+        return "Порт"
+    elif "одес" in t:
+        return "Одеса"
+    elif "море" in t:
+        return "Море"
     return None
 
-def parse_message(text):
+def parse_alerts(text):
     if not text:
-        return None
+        return []
     
-    text_lower = text.lower()
+    t = text.lower()
+    alerts = []
+    location = get_location(text)
     
-    for alert_key, alert_msg in ALERTS.items():
-        if alert_key in text_lower:
-            return alert_msg
+    if "шахед" in t:
+        alerts.append(f"🚨 ШАХЕДИ | {location}" if location else "🚨 ШАХЕДИ")
     
-    for threat_key, threat_msg in THREATS.items():
-        if threat_key in text_lower:
-            direction = extract_direction(text)
-            if direction:
-                return f"{threat_msg} | {direction}"
-            return threat_msg
+    if "баллістик" in t or "балістик" in t:
+        alerts.append(f"🚨 БАЛЛИСТИКА | {location}" if location else "🚨 БАЛЛИСТИКА")
     
-    if "укри" in text_lower:
-        words = text.split()
-        location = words[0] if words else ""
-        return f"🚨 {location} в укрытие!"
+    if "міг" in t or "міги" in t:
+        if "не було" in t or "не было" in t:
+            alerts.append("🚨 МИГ (без пуска)")
+        elif "пуск" in t:
+            alerts.append("🚨 МИГ ПУСК")
+        else:
+            alerts.append("🚨 МИГ")
     
-    return None
+    if "ракета" in t or "ракети" in t:
+        alerts.append(f"🚨 РАКЕТА | {location}" if location else "🚨 РАКЕТА")
+    
+    if "цель" in t or "цели" in t:
+        alerts.append(f"🚨 ЦЕЛЬ | {location}" if location else "🚨 ЦЕЛЬ")
+    
+    if "укри" in t or "укрыт" in t:
+        alerts.append(f"🚨 {location.upper()} В УКРЫТИЕ!!!" if location else "🚨 В УКРЫТИЕ!!!")
+    
+    if not alerts:
+        if "чисто" in t or "отбой" in t:
+            alerts.append("✅ ОТБОЙ")
+    
+    return alerts
 
-def get_latest_posts():
+def get_posts():
     try:
         response = requests.get(SOURCE_URL, timeout=20)
         soup = BeautifulSoup(response.text, "html.parser")
@@ -72,51 +85,40 @@ def get_latest_posts():
             text_block = message.select_one(".tgme_widget_message_text")
             text = text_block.get_text(" ", strip=True) if text_block else ""
             
-            # Проверяем есть ли фото (без видео)
-            has_photo = message.select_one(".tgme_widget_message_photo") is not None
-            has_video = message.select_one(".tgme_widget_message_video") is not None
-            
-            if post_id:
-                posts.append((post_id, text, has_photo and not has_video))
+            if post_id and text:
+                try:
+                    posts.append((int(post_id), text))
+                except:
+                    pass
         
+        posts.reverse()
         return posts
-    except Exception as e:
-        print(f"Error getting posts: {e}")
+    except:
         return []
 
-print("Alert forwarder started. Listening to @raketna_neb...")
+print("Alert forwarder LIVE")
 
 while True:
     try:
-        posts = get_latest_posts()
+        posts = get_posts()
         
         if posts:
-            latest_id, latest_text, has_photo = posts[-1]
+            msg_id, msg_text = posts[0]
             
-            if last_message_id is None:
-                last_message_id = latest_id
-                print(f"Initial message: {latest_id}")
-            elif latest_id != last_message_id:
-                last_message_id = latest_id
+            if msg_id > last_message_id:
+                last_message_id = msg_id
+                save_last_id(msg_id)
                 
-                alert_text = None
+                alerts = parse_alerts(msg_text)
                 
-                if latest_text:
-                    alert_text = parse_message(latest_text)
-                
-                if has_photo and not alert_text:
-                    alert_text = "🚨 ВОЗДУШНАЯ ТРЕВОГА"
-                
-                if alert_text:
+                for alert in alerts:
                     try:
-                        bot.send_message(TARGET_CHANNEL, alert_text)
-                        print(f"Sent: {alert_text}")
+                        bot.send_message(TARGET_CHANNEL, alert)
+                        print(f"✅ {alert}")
                     except Exception as e:
-                        print(f"Error sending: {e}")
-                else:
-                    print(f"Skipped: {latest_text[:50] if latest_text else 'photo'}")
+                        print(f"❌ Error: {e}")
         
-        time.sleep(3)
+        time.sleep(1)
     
     except Exception as e:
         print(f"Error: {e}")
