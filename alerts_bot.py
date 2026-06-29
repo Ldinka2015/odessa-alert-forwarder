@@ -106,10 +106,9 @@ async def handler(event):
 
 
 async def main():
-    print("Odessa alert forwarder started")
+    print("Forwarder started")
     await user_client.start()
     await user_client.run_until_disconnected()
 
 
-with user_client:
-    user_client.loop.run_until_complete(main())
+user_client.loop.run_until_complete(main())
