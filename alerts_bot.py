@@ -106,9 +106,10 @@ async def handler(event):
 
 
 async def main():
+    await user_client.connect()
+
+    if not await user_client.is_user_authorized():
+        raise RuntimeError("SESSION_STRING не работает или не добавлен в Railway")
+
     print("Forwarder started")
-    await user_client.start()
     await user_client.run_until_disconnected()
-
-
-user_client.loop.run_until_complete(main())
