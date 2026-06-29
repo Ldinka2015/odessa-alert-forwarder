@@ -20,12 +20,13 @@ THREAT_WORDS = [
     "ракета", "ракети", "крилат", "баліст", "баллист",
     "тривога", "тревога", "відбій", "отбой",
     "пво", "ппо", "чисто", "загроза", "угроза",
-    "курс", "напрям", "пуск", "міг", "миг", "х-69", "калібр"
+    "курс", "напрям", "пуск", "міг", "миг",
+    "х-69", "калібр"
 ]
 
 BLOCK_WORDS = [
-    "реклама", "підписатись", "підписатися", "донат",
-    "збір", "карта", "чат", "бот", "підтримати"
+    "реклама", "підписатись", "підписатися",
+    "донат", "збір", "чат", "підтримати"
 ]
 
 conn = sqlite3.connect("forwarded.db")
@@ -85,11 +86,9 @@ bot_client = TelegramClient(
 async def handler(event):
     text = event.message.message or ""
 
-    # Если сообщение только картинка/видео/стикер без текста — пропускаем
     if not text.strip():
         return
 
-    # Медиа не пересылаем. Берем только текст/подпись.
     if not is_relevant(text):
         return
 
@@ -107,7 +106,7 @@ async def handler(event):
 
 
 async def main():
-    print("Odessa forwarder started")
+    print("Odessa alert forwarder started")
     await user_client.start()
     await user_client.run_until_disconnected()
 
