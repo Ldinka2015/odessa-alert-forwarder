@@ -106,17 +106,12 @@ async def handler(event):
 
 
 async def main():
-    print("SESSION_STRING length:", len(SESSION_STRING or ""))
-    print("SESSION_STRING starts:", (SESSION_STRING or "")[:10])
-    print("SESSION_STRING ends:", (SESSION_STRING or "")[-10:])
-
+    print("Forwarder started")
     await user_client.connect()
-    await bot_client.start(bot_token=BOT_TOKEN)
 
     if not await user_client.is_user_authorized():
-        raise RuntimeError("SESSION_STRING не работает или не добавлен в Railway")
+        raise RuntimeError("SESSION_STRING is invalid or missing")
 
-    print("Forwarder started")
     await user_client.run_until_disconnected()
 
 
