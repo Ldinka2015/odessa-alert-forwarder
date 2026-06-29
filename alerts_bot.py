@@ -79,7 +79,7 @@ bot_client = TelegramClient(
     "bot_session",
     API_ID,
     API_HASH
-).start(bot_token=BOT_TOKEN)
+)
 
 
 @user_client.on(events.NewMessage(chats=SOURCE_CHANNELS))
@@ -107,9 +107,13 @@ async def handler(event):
 
 async def main():
     await user_client.connect()
+    await bot_client.start(bot_token=BOT_TOKEN)
 
     if not await user_client.is_user_authorized():
         raise RuntimeError("SESSION_STRING не работает или не добавлен в Railway")
 
     print("Forwarder started")
     await user_client.run_until_disconnected()
+
+
+user_client.loop.run_until_complete(main())
