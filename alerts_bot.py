@@ -106,11 +106,10 @@ async def handler(event):
 
 
 async def main():
-    print("Forwarder started")
-    await user_client.connect()
+    print("Forwarder started", flush=True)
 
-    if not await user_client.is_user_authorized():
-        raise RuntimeError("SESSION_STRING is invalid or missing")
+    await user_client.connect()
+    await bot_client.start(bot_token=BOT_TOKEN)
 
     await user_client.run_until_disconnected()
 
