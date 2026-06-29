@@ -111,7 +111,10 @@ async def main():
     await user_client.connect()
     await bot_client.start(bot_token=BOT_TOKEN)
 
-    await user_client.run_until_disconnected()
+    await bot_client.run_until_disconnected()
+
+
+user_client.loop.run_until_complete(main())
 
 
 user_client.loop.run_until_complete(main())
