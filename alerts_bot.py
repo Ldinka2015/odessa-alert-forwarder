@@ -106,6 +106,10 @@ async def handler(event):
 
 
 async def main():
+    print("SESSION_STRING length:", len(SESSION_STRING or ""))
+    print("SESSION_STRING starts:", (SESSION_STRING or "")[:10])
+    print("SESSION_STRING ends:", (SESSION_STRING or "")[-10:])
+
     await user_client.connect()
     await bot_client.start(bot_token=BOT_TOKEN)
 
