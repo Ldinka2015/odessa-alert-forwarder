@@ -1,228 +1,116 @@
 import os
-import time
-import json
 import re
-import html
-from io import BytesIO
+import sqlite3
+import hashlib
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
-import requests
-from bs4 import BeautifulSoup
-from PIL import Image
-import telebot
-
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SESSION_STRING = os.getenv("SESSION_STRING")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TARGET_CHANNEL = os.getenv("TARGET_CHANNEL", "@twq_b")
-SOURCE_URL = "https://t.me/s/raketna_neb"
-STATE_FILE = "processed_ids.json"
+TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN не задан")
+SOURCE_CHANNELS = [
+    "odessa_inform",
+]
 
-bot = telebot.TeleBot(BOT_TOKEN)
+THREAT_WORDS = [
+    "шахед", "shahed", "бпла", "бпілот", "розвід",
+    "ракета", "ракети", "крилат", "баліст", "баллист",
+    "тривога", "тревога", "відбій", "отбой",
+    "пво", "ппо", "чисто", "загроза", "угроза",
+    "курс", "напрям", "пуск", "міг", "миг", "х-69", "калібр"
+]
 
+BLOCK_WORDS = [
+    "реклама", "підписатись", "підписатися", "донат",
+    "збір", "карта", "чат", "бот", "підтримати"
+]
 
-def load_processed_ids():
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    except Exception:
-        return set()
-
-
-def save_processed_ids(ids):
-    ids = list(ids)[-1000:]
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(ids, f, ensure_ascii=False)
-
-
-processed_ids = load_processed_ids()
-
-
-def get_image_url(widget):
-    photo = widget.select_one(".tgme_widget_message_photo_wrap")
-    if not photo:
-        return None
-
-    style = photo.get("style", "")
-    match = re.search(r"url\(['\"]?(.*?)['\"]?\)", style)
-
-    if not match:
-        return None
-
-    return html.unescape(match.group(1))
+conn = sqlite3.connect("forwarded.db")
+cur = conn.cursor()
+cur.execute("""
+CREATE TABLE IF NOT EXISTS forwarded (
+    hash TEXT PRIMARY KEY
+)
+""")
+conn.commit()
 
 
-def classify_image_by_color(image_url):
-    try:
-        response = requests.get(
-            image_url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        response.raise_for_status()
-
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-        img = img.resize((80, 80))
-
-        red_score = 0
-        green_score = 0
-
-        for r, g, b in img.getdata():
-            if r > 150 and g < 120 and b < 120:
-                red_score += 1
-            if g > 120 and r < 120 and b < 120:
-                green_score += 1
-
-        if red_score > 80 and red_score > green_score * 1.5:
-            return "alarm"
-
-        if green_score > 80 and green_score > red_score * 1.5:
-            return "clear"
-
-        return None
-
-    except Exception as e:
-        print(f"Image error: {e}")
-        return None
+def normalize_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
-def make_text_alert(text):
+def is_relevant(text: str) -> bool:
     if not text:
-        return None
+        return False
 
-    t = text.lower()
+    clean = normalize_text(text)
 
-    if "відбій" in t or "отбой" in t or "чисто" in t:
-        return f"✅ ОТБОЙ\n{text}"
+    if any(word in clean for word in BLOCK_WORDS):
+        return False
 
-    if "повітряна тривога" in t or "тривога" in t or "тревога" in t:
-        return f"🚨 ПОВІТРЯНА ТРИВОГА\n{text}"
-
-    if "укрит" in t or "укрыт" in t:
-        return f"🚨 В УКРЫТИЕ\n{text}"
-
-    if "шахед" in t or "бпла" in t:
-        return f"🚨 ШАХЕДЫ / БПЛА\n{text}"
-
-    if "баліст" in t or "балліст" in t or "баллист" in t:
-        return f"🚨 БАЛЛИСТИКА\n{text}"
-
-    if "міг" in t or "миг" in t or "мiг" in t:
-        return f"🚨 МИГ\n{text}"
-
-    if "ракета" in t or "ракети" in t or "ракеты" in t:
-        return f"🚨 РАКЕТЫ\n{text}"
-
-    if (
-        "летить" in t
-        or "летять" in t
-        or "курс" in t
-        or "напрям" in t
-        or "направлен" in t
-        or "пуск" in t
-        or "пуски" in t
-    ):
-        return f"🚨 НАПРАВЛЕНИЕ / КУРС\n{text}"
-
-    return None
+    return any(word in clean for word in THREAT_WORDS)
 
 
-def get_posts():
-    response = requests.get(
-        SOURCE_URL,
-        timeout=20,
-        headers={"User-Agent": "Mozilla/5.0"}
+def already_forwarded(text: str) -> bool:
+    h = hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
+
+    cur.execute("SELECT 1 FROM forwarded WHERE hash = ?", (h,))
+    if cur.fetchone():
+        return True
+
+    cur.execute("INSERT INTO forwarded(hash) VALUES (?)", (h,))
+    conn.commit()
+    return False
+
+
+user_client = TelegramClient(
+    StringSession(SESSION_STRING),
+    API_ID,
+    API_HASH
+)
+
+bot_client = TelegramClient(
+    "bot_session",
+    API_ID,
+    API_HASH
+).start(bot_token=BOT_TOKEN)
+
+
+@user_client.on(events.NewMessage(chats=SOURCE_CHANNELS))
+async def handler(event):
+    text = event.message.message or ""
+
+    # Если сообщение только картинка/видео/стикер без текста — пропускаем
+    if not text.strip():
+        return
+
+    # Медиа не пересылаем. Берем только текст/подпись.
+    if not is_relevant(text):
+        return
+
+    if already_forwarded(text):
+        return
+
+    source = event.chat.username or event.chat.title
+
+    message = (
+        f"{text.strip()}\n\n"
+        f"Джерело: @{source}"
     )
-    response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    posts = []
-
-    for widget in soup.select(".tgme_widget_message_wrap"):
-        message = widget.select_one(".tgme_widget_message")
-        if not message:
-            continue
-
-        post_id = message.get("data-post")
-        if not post_id:
-            continue
-
-        text_block = message.select_one(".tgme_widget_message_text")
-        text = text_block.get_text(" ", strip=True) if text_block else ""
-        text = re.sub(r"\s+", " ", text).strip()
-
-        image_url = get_image_url(widget)
-
-        posts.append({
-            "id": post_id,
-            "text": text,
-            "image_url": image_url
-        })
-
-    return posts
+    await bot_client.send_message(TARGET_CHANNEL, message)
 
 
-print("Alert forwarder LIVE")
-
-if not processed_ids:
-    try:
-        posts = get_posts()
-        for post in posts:
-            processed_ids.add(post["id"])
-
-        save_processed_ids(processed_ids)
-        print(f"Initial sync complete. Saved {len(posts)} old posts. Nothing sent.")
-
-    except Exception as e:
-        print(f"Initial sync error: {e}")
+async def main():
+    print("Odessa forwarder started")
+    await user_client.start()
+    await user_client.run_until_disconnected()
 
 
-while True:
-    try:
-        posts = get_posts()
-
-        new_posts = [
-            post for post in posts
-            if post["id"] not in processed_ids
-        ]
-
-        for post in new_posts:
-            post_id = post["id"]
-            text = post["text"]
-            image_url = post["image_url"]
-
-            processed_ids.add(post_id)
-
-            alert = make_text_alert(text)
-
-            if not alert and image_url:
-                image_type = classify_image_by_color(image_url)
-
-                if image_type == "alarm":
-                    alert = "🚨 ПОВІТРЯНА ТРИВОГА"
-                    if text:
-                        alert += f"\n{text}"
-
-                elif image_type == "clear":
-                    alert = "✅ ОТБОЙ"
-                    if text:
-                        alert += f"\n{text}"
-
-            if alert:
-                bot.send_message(TARGET_CHANNEL, alert)
-                print(f"✅ Sent: {post_id}")
-            else:
-                print(f"Skipped non-alert: {post_id}")
-
-        if new_posts:
-            save_processed_ids(processed_ids)
-
-        time.sleep(2)
-
-    except requests.exceptions.RequestException as e:
-        print(f"Network error: {e}")
-        time.sleep(10)
-
-    except Exception as e:
-        print(f"General error: {e}")
-        time.sleep(5)
+with user_client:
+    user_client.loop.run_until_complete(main())
