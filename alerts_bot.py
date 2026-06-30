@@ -12,7 +12,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
 
 SOURCE_CHANNELS = [
-    "odessa_inform",
+    "https://t.me/odessa_inform",
 ]
 
 THREAT_WORDS = [
@@ -85,14 +85,18 @@ bot_client = TelegramClient(
 @user_client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def handler(event):
     text = event.message.message or ""
-print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
+
+    print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
+
     if not text.strip():
         return
 
     if not is_relevant(text):
+        print("MESSAGE SKIPPED: not relevant", flush=True)
         return
 
     if already_forwarded(text):
+        print("MESSAGE SKIPPED: already forwarded", flush=True)
         return
 
     source = event.chat.username or event.chat.title
@@ -103,18 +107,18 @@ print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
     )
 
     await bot_client.send_message(TARGET_CHANNEL, message)
+    print("MESSAGE SENT TO TARGET", flush=True)
 
 
 async def main():
-    print("Forwarder started", flush=True)
+    print("Forwarder starting", flush=True)
 
     await user_client.connect()
     await bot_client.start(bot_token=BOT_TOKEN)
+
+    print("Forwarder started", flush=True)
 
     await bot_client.run_until_disconnected()
 
 
 user_client.loop.run_until_complete(main())
-
-
-
