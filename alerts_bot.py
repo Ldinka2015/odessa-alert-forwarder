@@ -85,7 +85,7 @@ bot_client = TelegramClient(
 @user_client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def handler(event):
     text = event.message.message or ""
-
+print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
     if not text.strip():
         return
 
@@ -117,4 +117,4 @@ async def main():
 user_client.loop.run_until_complete(main())
 
 
-user_client.loop.run_until_complete(main())
+
