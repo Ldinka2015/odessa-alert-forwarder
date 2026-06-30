@@ -77,7 +77,7 @@ bot_client = TelegramClient(
 async def main():
     print("Forwarder starting", flush=True)
 
-    await user_client.start()
+    await user_client.connect()
     await bot_client.start(bot_token=BOT_TOKEN)
 
     source_entity = await user_client.get_entity(SOURCE_CHANNEL)
@@ -112,5 +112,4 @@ async def main():
     await user_client.run_until_disconnected()
 
 
-with user_client:
-    user_client.loop.run_until_complete(main())
+user_client.loop.run_until_complete(main())
