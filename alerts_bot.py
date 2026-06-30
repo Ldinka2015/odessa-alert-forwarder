@@ -11,9 +11,7 @@ SESSION_STRING = os.getenv("SESSION_STRING")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TARGET_CHANNEL = os.getenv("TARGET_CHANNEL")
 
-SOURCE_CHANNELS = [
-    "https://t.me/odessa_inform",
-]
+SOURCE_CHANNEL = "odessa_inform"
 
 THREAT_WORDS = [
     "шахед", "shahed", "бпла", "бпілот", "розвід",
@@ -31,25 +29,19 @@ BLOCK_WORDS = [
 
 conn = sqlite3.connect("forwarded.db")
 cur = conn.cursor()
-cur.execute("""
-CREATE TABLE IF NOT EXISTS forwarded (
-    hash TEXT PRIMARY KEY
-)
-""")
+cur.execute("CREATE TABLE IF NOT EXISTS forwarded (hash TEXT PRIMARY KEY)")
 conn.commit()
 
 
 def normalize_text(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text.lower()).strip()
 
 
 def is_relevant(text: str) -> bool:
-    if not text:
-        return False
-
     clean = normalize_text(text)
+
+    if not clean:
+        return False
 
     if any(word in clean for word in BLOCK_WORDS):
         return False
@@ -82,43 +74,43 @@ bot_client = TelegramClient(
 )
 
 
-@user_client.on(events.NewMessage(chats=SOURCE_CHANNELS))
-async def handler(event):
-    text = event.message.message or ""
-
-    print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
-
-    if not text.strip():
-        return
-
-    if not is_relevant(text):
-        print("MESSAGE SKIPPED: not relevant", flush=True)
-        return
-
-    if already_forwarded(text):
-        print("MESSAGE SKIPPED: already forwarded", flush=True)
-        return
-
-    source = event.chat.username or event.chat.title
-
-    message = (
-        f"{text.strip()}\n\n"
-        f"Джерело: @{source}"
-    )
-
-    await bot_client.send_message(TARGET_CHANNEL, message)
-    print("MESSAGE SENT TO TARGET", flush=True)
-
-
 async def main():
     print("Forwarder starting", flush=True)
 
-    await user_client.connect()
+    await user_client.start()
     await bot_client.start(bot_token=BOT_TOKEN)
 
+    source_entity = await user_client.get_entity(SOURCE_CHANNEL)
+
+    print(f"Source connected: {source_entity.id} {source_entity.title}", flush=True)
     print("Forwarder started", flush=True)
 
-    await bot_client.run_until_disconnected()
+    @user_client.on(events.NewMessage(chats=source_entity))
+    async def handler(event):
+        text = event.message.message or ""
+
+        print("NEW MESSAGE RECEIVED:", text[:200], flush=True)
+
+        if not is_relevant(text):
+            print("MESSAGE SKIPPED: not relevant", flush=True)
+            return
+
+        if already_forwarded(text):
+            print("MESSAGE SKIPPED: already forwarded", flush=True)
+            return
+
+        source = event.chat.username or event.chat.title or SOURCE_CHANNEL
+
+        message = (
+            f"{text.strip()}\n\n"
+            f"Джерело: @{source}"
+        )
+
+        await bot_client.send_message(TARGET_CHANNEL, message)
+        print("MESSAGE SENT TO TARGET", flush=True)
+
+    await user_client.run_until_disconnected()
 
 
-user_client.loop.run_until_complete(main())
+with user_client:
+    user_client.loop.run_until_complete(main())
